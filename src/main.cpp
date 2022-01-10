@@ -97,22 +97,6 @@ unsigned long now = 0;
 void loop()
 {
   now = millis();
-  Serial.print("ditState: ");
-  Serial.print(ditState);
-  Serial.print(" dahState: ");
-  Serial.print(dahState);
-  Serial.print(" sendingDit: ");
-  Serial.print(sendingDit);
-  Serial.print(" completedDit: ");
-  Serial.print(completedDit);
-  Serial.print(" idle: ");
-  Serial.print(idle);
-  Serial.print(" nextStateSet: ");
-  Serial.print(nextStateSet);
-  Serial.print(" nextState: ");
-  Serial.print(nextState);
-  Serial.print(" State: ");
-  Serial.println(state);
 
   switch (state)
   {
@@ -275,9 +259,81 @@ void loop()
     break;
 
   case ENDCHAR:
+    if (!idle)
+    {
+      idle = true;
+      lastIdleTriggered = now;
+    }
+
+    if (now - lastIdleTriggered > ditLength * 2)
+    {
+      state = nextState;
+      nextStateSet = false;
+      idle = false;
+      lastIdleTriggered = 0;
+      break;
+    }
+    else
+    {
+      if (!nextStateSet)
+      {
+        // check paddles
+        if (dahState)
+        {
+          nextState = DAHSTATE;
+          nextStateSet = true;
+        }
+        else if (ditState)
+        {
+          nextState = DITSTATE;
+          nextStateSet = true;
+        }
+        else
+        {
+          nextState = ENDWORD;
+        }
+      }
+    }
+
     break;
 
   case ENDWORD:
+    if (!idle)
+    {
+      idle = true;
+      lastIdleTriggered = now;
+    }
+
+    if (now - lastIdleTriggered > ditLength * 4)
+    {
+      state = nextState;
+      nextStateSet = false;
+      idle = false;
+      lastIdleTriggered = 0;
+      break;
+    }
+    else
+    {
+      if (!nextStateSet)
+      {
+        // check paddles
+        if (dahState)
+        {
+          nextState = DAHSTATE;
+          nextStateSet = true;
+        }
+        else if (ditState)
+        {
+          nextState = DITSTATE;
+          nextStateSet = true;
+        }
+        else
+        {
+          nextState = START;
+        }
+      }
+    }
+
     break;
   }
 }
