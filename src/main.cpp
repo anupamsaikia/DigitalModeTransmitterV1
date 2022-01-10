@@ -10,9 +10,6 @@
 #define ACTIVE_HIGH 1
 const int paddleInputLevel = ACTIVE_LOW;
 
-// The delay threshold for debounce checking (in millis).
-const int debounceDelay = 5;
-
 int wpm = 15;  // Words per minute
 int fwpm = 15; // Farnsworth speed
 
@@ -36,56 +33,23 @@ enum MorseStates
 MorseStates state = START;
 
 // read dit state
-volatile unsigned long lastDebounceTimeForDit = 0;
 IRAM_ATTR void handleDitInterrupt()
 {
   // Get the pin reading.
-  boolean reading;
   if (paddleInputLevel == ACTIVE_LOW)
-    reading = !digitalRead(DIT_PIN);
+    ditState = !digitalRead(DIT_PIN);
   else
-    reading = !!digitalRead(DIT_PIN);
-
-  // Ignore duplicate readings.
-  if (reading == ditState)
-    return;
-  boolean debounce = false;
-  // Check to see if the change is within a debounce delay threshold.
-  if ((millis() - lastDebounceTimeForDit) <= debounceDelay)
-    debounce = true;
-  // This update to the last debounce check is necessary regardless of debounce state.
-  lastDebounceTimeForDit = millis();
-  // Ignore reads within a debounce delay threshold.
-  if (debounce)
-    return;
-  // All is good, persist the reading as the ditState.
-  ditState = reading;
+    ditState = !!digitalRead(DIT_PIN);
 }
 
 // read dah state
-volatile unsigned long lastDebounceTimeForDah = 0;
 IRAM_ATTR void handleDahInterrupt()
 {
   // Get the pin reading.
-  boolean reading;
   if (paddleInputLevel == ACTIVE_LOW)
-    reading = !digitalRead(DAH_PIN);
+    dahState = !digitalRead(DAH_PIN);
   else
-    reading = !!digitalRead(DAH_PIN);
-  // Ignore duplicate readings.
-  if (reading == dahState)
-    return;
-  boolean debounce = false;
-  // Check to see if the change is within a debounce delay threshold.
-  if ((millis() - lastDebounceTimeForDah) <= debounceDelay)
-    debounce = true;
-  // This update to the last debounce check is necessary regardless of debounce state.
-  lastDebounceTimeForDah = millis();
-  // Ignore reads within a debounce delay threshold.
-  if (debounce)
-    return;
-  // All is good, persist the reading as the dahState.
-  dahState = reading;
+    dahState = !!digitalRead(DAH_PIN);
 }
 
 // Turn output off
@@ -132,6 +96,16 @@ void loop()
   Serial.print(ditState);
   Serial.print(" dahState: ");
   Serial.print(dahState);
+  Serial.print(" sendingDit: ");
+  Serial.print(sendingDit);
+  Serial.print(" completedDit: ");
+  Serial.print(completedDit);
+  Serial.print(" idle: ");
+  Serial.print(idle);
+  Serial.print(" nextStateSet: ");
+  Serial.print(nextStateSet);
+  Serial.print(" nextState: ");
+  Serial.print(nextState);
   Serial.print(" State: ");
   Serial.println(state);
 
@@ -188,6 +162,7 @@ void loop()
 
         idle = false;
         lastIdleTriggered = 0;
+        completedDit = false;
         break;
       }
       else
