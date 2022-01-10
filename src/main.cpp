@@ -15,6 +15,7 @@ int fwpm = 15; // Farnsworth speed
 
 // calculate timings in miliseconds based on the formula: T = 1200 / WPM
 int ditLength = 1200 / wpm;
+int dahLength = 1200 * 3 / wpm;
 int letterSpaceLength = 1200 * 3 / fwpm;
 
 // holds the current state of the paddles
@@ -81,6 +82,10 @@ void setup()
 boolean sendingDit = false;
 boolean completedDit = false;
 unsigned long lastDitTriggerd = 0;
+
+boolean sendingDah = false;
+boolean completedDah = false;
+unsigned long lastDahTriggerd = 0;
 
 boolean idle = false;
 unsigned long lastIdleTriggered = 0;
@@ -196,6 +201,77 @@ void loop()
     break;
 
   case DAHSTATE:
+    // Before dah start:
+    if (!sendingDah && !completedDah)
+    {
+      sendingDah = true;
+      lastDahTriggerd = now;
+      keyDown();
+      break;
+    }
+
+    // After dah started:
+    if (sendingDah && !completedDah)
+    {
+      if (now - lastDahTriggerd >= dahLength)
+      {
+        lastDahTriggerd = 0;
+        sendingDah = false;
+        completedDah = true;
+        keyUp();
+        idle = true;
+        lastIdleTriggered = now;
+        break;
+      }
+
+      // check opposite paddle
+      if (ditState)
+      {
+        nextStateSet = true;
+        nextState = DITSTATE;
+      }
+    }
+
+    // After dah ended:
+    if (!sendingDah && completedDah)
+    {
+      if (now - lastIdleTriggered > ditLength)
+      {
+        state = nextState;
+        nextStateSet = false;
+        idle = false;
+        lastIdleTriggered = 0;
+        completedDah = false;
+        break;
+      }
+      else
+      {
+        if (!nextStateSet)
+        {
+          // check paddles
+          if (ditState && dahState)
+          {
+            nextState = DITSTATE;
+            nextStateSet = true;
+          }
+          else if (dahState)
+          {
+            nextState = DAHSTATE;
+            nextStateSet = true;
+          }
+          else if (ditState)
+          {
+            nextState = DITSTATE;
+            nextStateSet = true;
+          }
+          else
+          {
+            nextState = ENDCHAR;
+          }
+        }
+      }
+    }
+
     break;
 
   case ENDCHAR:
