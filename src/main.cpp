@@ -4,6 +4,7 @@
 #define DIT_PIN D1
 #define DAH_PIN D2
 #define PIN_CW_OUT D5
+#define PIN_BUZZER_OUT D6
 
 // paddle input active-low or active-high
 #define ACTIVE_LOW 0
@@ -57,11 +58,13 @@ IRAM_ATTR void handleDahInterrupt()
 void keyUp()
 {
   digitalWrite(PIN_CW_OUT, LOW);
+  noTone(PIN_BUZZER_OUT);
 }
 // Turn output on
 void keyDown()
 {
   digitalWrite(PIN_CW_OUT, HIGH);
+  tone(PIN_BUZZER_OUT, 1000);
 }
 
 // pin init
