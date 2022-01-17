@@ -1,8 +1,13 @@
 #include <Arduino.h>
+#include "si5351.h"
+#include "Wire.h"
+
+Si5351 si5351;
+int32_t cal_factor = 148870;
 
 // pin definition for ESP8266 12E
-#define DIT_PIN D1
-#define DAH_PIN D2
+#define DIT_PIN D3
+#define DAH_PIN D4
 #define PIN_CW_OUT D5
 #define PIN_BUZZER_OUT D6
 
@@ -59,12 +64,14 @@ void keyUp()
 {
   digitalWrite(PIN_CW_OUT, LOW);
   noTone(PIN_BUZZER_OUT);
+  si5351.output_enable(SI5351_CLK0, 0);
 }
 // Turn output on
 void keyDown()
 {
   digitalWrite(PIN_CW_OUT, HIGH);
   tone(PIN_BUZZER_OUT, 1000);
+  si5351.output_enable(SI5351_CLK0, 1);
 }
 
 // pin init
@@ -78,7 +85,18 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(DIT_PIN), handleDitInterrupt, CHANGE);
   attachInterrupt(digitalPinToInterrupt(DAH_PIN), handleDahInterrupt, CHANGE);
 
-  Serial.begin(115200);
+  // Start serial and initialize the Si5351
+  Serial.begin(57600);
+  si5351.init(SI5351_CRYSTAL_LOAD_8PF, 0, 0);
+
+  si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
+
+  // Set CLK0 to output 7 MHz
+  si5351.set_freq(702300000ULL, SI5351_CLK0);
+
+  si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_2MA);
+  // output on/off
+  si5351.output_enable(SI5351_CLK0, 0);
 }
 
 // main loop
@@ -100,6 +118,19 @@ unsigned long now = 0;
 void loop()
 {
   now = millis();
+
+  // si5351
+  si5351.update_status();
+  Serial.print("SYS_INIT: ");
+  Serial.print(si5351.dev_status.SYS_INIT);
+  Serial.print("  LOL_A: ");
+  Serial.print(si5351.dev_status.LOL_A);
+  Serial.print("  LOL_B: ");
+  Serial.print(si5351.dev_status.LOL_B);
+  Serial.print("  LOS: ");
+  Serial.print(si5351.dev_status.LOS);
+  Serial.print("  REVID: ");
+  Serial.println(si5351.dev_status.REVID);
 
   switch (state)
   {
