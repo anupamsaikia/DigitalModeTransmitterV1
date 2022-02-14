@@ -5,30 +5,37 @@
 Si5351 si5351;
 int32_t cal_factor = 148870;
 
+#define ACTIVE_LOW 0
+#define ACTIVE_HIGH 1
+
 // pin definition for ESP8266 12E
+#pragma region Pin_definitions
 #define DIT_PIN D3
 #define DAH_PIN D4
 #define PIN_CW_OUT D5
 #define PIN_BUZZER_OUT D6
+#pragma endregion Pin_definitions
 
-// paddle input active-low or active-high
-#define ACTIVE_LOW 0
-#define ACTIVE_HIGH 1
-const int paddleInputLevel = ACTIVE_LOW;
+// common global states
+#pragma region Common_Global_States
 
-int wpm = 15;  // Words per minute
-int fwpm = 15; // Farnsworth speed
+int wpm = 15; // Words per minute for cw mode
+
+#pragma endregion Common_Global_States
+
+// CW Keyer functionality
+#pragma region CW_Keyer
+const int paddleInputLevel = ACTIVE_LOW; // paddle input active-low
 
 // calculate timings in miliseconds based on the formula: T = 1200 / WPM
 int ditLength = 1200 / wpm;
 int dahLength = 1200 * 3 / wpm;
-int letterSpaceLength = 1200 * 3 / fwpm;
 
 // holds the current state of the paddles
 volatile boolean ditState;
 volatile boolean dahState;
 
-// Morse states
+// Morse keyer states
 enum MorseStates
 {
   START,
@@ -37,7 +44,7 @@ enum MorseStates
   ENDCHAR,
   ENDWORD,
 };
-MorseStates state = START;
+MorseStates keyerState = START;
 
 // read dit state
 IRAM_ATTR void handleDitInterrupt()
@@ -74,14 +81,32 @@ void keyDown()
   si5351.output_enable(SI5351_CLK0, 1);
 }
 
+// state variables for CW
+boolean sendingDit = false;
+boolean completedDit = false;
+unsigned long lastDitTriggerd = 0;
+
+boolean sendingDah = false;
+boolean completedDah = false;
+unsigned long lastDahTriggerd = 0;
+
+boolean keyerIdle = false;
+unsigned long lastKeyerIdleTriggered = 0;
+
+boolean nextKeyerStateSet = false;
+MorseStates nextKeyerState;
+
+#pragma endregion CW_Keyer
+
 // pin init
 void setup()
 {
+  // set pinmodes for cw keyer pins
   pinMode(DIT_PIN, INPUT_PULLUP);
   pinMode(DAH_PIN, INPUT_PULLUP);
   pinMode(PIN_CW_OUT, OUTPUT);
 
-  // attach interrupts
+  // attach interrupts for cw keyer paddles
   attachInterrupt(digitalPinToInterrupt(DIT_PIN), handleDitInterrupt, CHANGE);
   attachInterrupt(digitalPinToInterrupt(DAH_PIN), handleDahInterrupt, CHANGE);
 
@@ -100,19 +125,6 @@ void setup()
 }
 
 // main loop
-boolean sendingDit = false;
-boolean completedDit = false;
-unsigned long lastDitTriggerd = 0;
-
-boolean sendingDah = false;
-boolean completedDah = false;
-unsigned long lastDahTriggerd = 0;
-
-boolean idle = false;
-unsigned long lastIdleTriggered = 0;
-
-boolean nextStateSet = false;
-MorseStates nextState;
 
 unsigned long now = 0;
 void loop()
@@ -132,14 +144,16 @@ void loop()
   Serial.print("  REVID: ");
   Serial.println(si5351.dev_status.REVID);
 
-  switch (state)
+  // CW Keyer State machine
+#pragma region CW_Keyer_State_Machine
+  switch (keyerState)
   {
   case START:
 
     if (ditState)
-      state = DITSTATE;
+      keyerState = DITSTATE;
     else if (dahState)
-      state = DAHSTATE;
+      keyerState = DAHSTATE;
 
     break;
 
@@ -162,55 +176,55 @@ void loop()
         sendingDit = false;
         completedDit = true;
         keyUp();
-        idle = true;
-        lastIdleTriggered = now;
+        keyerIdle = true;
+        lastKeyerIdleTriggered = now;
         break;
       }
 
       // check opposite paddle
       if (dahState)
       {
-        nextStateSet = true;
-        nextState = DAHSTATE;
+        nextKeyerStateSet = true;
+        nextKeyerState = DAHSTATE;
       }
     }
 
     // After dit ended:
     if (!sendingDit && completedDit)
     {
-      if (now - lastIdleTriggered > ditLength)
+      if (now - lastKeyerIdleTriggered > ditLength)
       {
-        state = nextState;
-        nextStateSet = false;
+        keyerState = nextKeyerState;
+        nextKeyerStateSet = false;
 
-        idle = false;
-        lastIdleTriggered = 0;
+        keyerIdle = false;
+        lastKeyerIdleTriggered = 0;
         completedDit = false;
         break;
       }
       else
       {
-        if (!nextStateSet)
+        if (!nextKeyerStateSet)
         {
           // check paddles
           if (ditState && dahState)
           {
-            nextState = DAHSTATE;
-            nextStateSet = true;
+            nextKeyerState = DAHSTATE;
+            nextKeyerStateSet = true;
           }
           else if (dahState)
           {
-            nextState = DAHSTATE;
-            nextStateSet = true;
+            nextKeyerState = DAHSTATE;
+            nextKeyerStateSet = true;
           }
           else if (ditState)
           {
-            nextState = DITSTATE;
-            nextStateSet = true;
+            nextKeyerState = DITSTATE;
+            nextKeyerStateSet = true;
           }
           else
           {
-            nextState = ENDCHAR;
+            nextKeyerState = ENDCHAR;
           }
         }
       }
@@ -237,54 +251,54 @@ void loop()
         sendingDah = false;
         completedDah = true;
         keyUp();
-        idle = true;
-        lastIdleTriggered = now;
+        keyerIdle = true;
+        lastKeyerIdleTriggered = now;
         break;
       }
 
       // check opposite paddle
       if (ditState)
       {
-        nextStateSet = true;
-        nextState = DITSTATE;
+        nextKeyerStateSet = true;
+        nextKeyerState = DITSTATE;
       }
     }
 
     // After dah ended:
     if (!sendingDah && completedDah)
     {
-      if (now - lastIdleTriggered > ditLength)
+      if (now - lastKeyerIdleTriggered > ditLength)
       {
-        state = nextState;
-        nextStateSet = false;
-        idle = false;
-        lastIdleTriggered = 0;
+        keyerState = nextKeyerState;
+        nextKeyerStateSet = false;
+        keyerIdle = false;
+        lastKeyerIdleTriggered = 0;
         completedDah = false;
         break;
       }
       else
       {
-        if (!nextStateSet)
+        if (!nextKeyerStateSet)
         {
           // check paddles
           if (ditState && dahState)
           {
-            nextState = DITSTATE;
-            nextStateSet = true;
+            nextKeyerState = DITSTATE;
+            nextKeyerStateSet = true;
           }
           else if (dahState)
           {
-            nextState = DAHSTATE;
-            nextStateSet = true;
+            nextKeyerState = DAHSTATE;
+            nextKeyerStateSet = true;
           }
           else if (ditState)
           {
-            nextState = DITSTATE;
-            nextStateSet = true;
+            nextKeyerState = DITSTATE;
+            nextKeyerStateSet = true;
           }
           else
           {
-            nextState = ENDCHAR;
+            nextKeyerState = ENDCHAR;
           }
         }
       }
@@ -293,38 +307,38 @@ void loop()
     break;
 
   case ENDCHAR:
-    if (!idle)
+    if (!keyerIdle)
     {
-      idle = true;
-      lastIdleTriggered = now;
+      keyerIdle = true;
+      lastKeyerIdleTriggered = now;
     }
 
-    if (now - lastIdleTriggered > ditLength * 2)
+    if (now - lastKeyerIdleTriggered > ditLength * 2)
     {
-      state = nextState;
-      nextStateSet = false;
-      idle = false;
-      lastIdleTriggered = 0;
+      keyerState = nextKeyerState;
+      nextKeyerStateSet = false;
+      keyerIdle = false;
+      lastKeyerIdleTriggered = 0;
       break;
     }
     else
     {
-      if (!nextStateSet)
+      if (!nextKeyerStateSet)
       {
         // check paddles
         if (dahState)
         {
-          nextState = DAHSTATE;
-          nextStateSet = true;
+          nextKeyerState = DAHSTATE;
+          nextKeyerStateSet = true;
         }
         else if (ditState)
         {
-          nextState = DITSTATE;
-          nextStateSet = true;
+          nextKeyerState = DITSTATE;
+          nextKeyerStateSet = true;
         }
         else
         {
-          nextState = ENDWORD;
+          nextKeyerState = ENDWORD;
         }
       }
     }
@@ -332,42 +346,45 @@ void loop()
     break;
 
   case ENDWORD:
-    if (!idle)
+    if (!keyerIdle)
     {
-      idle = true;
-      lastIdleTriggered = now;
+      keyerIdle = true;
+      lastKeyerIdleTriggered = now;
     }
 
-    if (now - lastIdleTriggered > ditLength * 4)
+    if (now - lastKeyerIdleTriggered > ditLength * 4)
     {
-      state = nextState;
-      nextStateSet = false;
-      idle = false;
-      lastIdleTriggered = 0;
+      keyerState = nextKeyerState;
+      nextKeyerStateSet = false;
+      keyerIdle = false;
+      lastKeyerIdleTriggered = 0;
       break;
     }
     else
     {
-      if (!nextStateSet)
+      if (!nextKeyerStateSet)
       {
         // check paddles
         if (dahState)
         {
-          nextState = DAHSTATE;
-          nextStateSet = true;
+          nextKeyerState = DAHSTATE;
+          nextKeyerStateSet = true;
         }
         else if (ditState)
         {
-          nextState = DITSTATE;
-          nextStateSet = true;
+          nextKeyerState = DITSTATE;
+          nextKeyerStateSet = true;
         }
         else
         {
-          nextState = START;
+          nextKeyerState = START;
         }
       }
     }
 
     break;
   }
+#pragma endregion CW_Keyer_State_Machine
+
+  // end of loop
 }
