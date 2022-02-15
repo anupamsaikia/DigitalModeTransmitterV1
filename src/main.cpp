@@ -16,10 +16,35 @@ int32_t cal_factor = 148870;
 #define PIN_BUZZER_OUT D6
 #pragma endregion Pin_definitions
 
+enum DeviceModes
+{
+  STANDALONE,
+  WEBSERVER,
+  WSJTX
+};
+
+enum OperatingModes
+{
+  CW,
+  PIXIE_CW,
+  WSPR,
+  FT8,
+  FSQ_2,
+  FSQ_3,
+  FSQ_4_5,
+  FSQ_6
+};
+
 // common global states
 #pragma region Common_Global_States
 
-int wpm = 15; // Words per minute for cw mode
+int wpm = 15;                          // Words per minute for cw mode
+DeviceModes deviceMode = STANDALONE;   // default device mode is standalone
+OperatingModes operatingMode = CW;     // default op mode is CW
+uint64_t frequency = 7023000 * 100ULL; // 7.023 MHz
+int32_t cal_factor = 148870;           // si5351 calibration factor
+boolean txEnabled = false;             // flag to denote if transmit is enabled or disabled
+char txMessage[100] = "";              // tx message
 
 #pragma endregion Common_Global_States
 
