@@ -66,10 +66,20 @@ JTEncode jtencode;
 // pin definition for ESP8266 12E
 #pragma region Pin_definitions
 
-#define DIT_PIN D3    // DIT paddle
-#define DAH_PIN D4    // DAH paddle
-#define PTT_PIN D5    // Will be active while transmitting
-#define BUZZER_PIN D6 // Buzzer output
+#if defined(ESP8266)
+#define DIT_PIN D3        // GPIO0, DIT paddle
+#define DAH_PIN D4        // GPIO2, DAH paddle
+#define ROTARY_CLK_PIN D5 // GPIO14, Rotary encoder CLK pin
+#define ROTARY_DT_PIN D6  // GPIO12, Rotary encoder DT pin
+#define ROTARY_SW_PIN D7  // GPIO13, Rotary encoder SW pin
+#define PTT_PIN D0        // GPIO16, Will be active while transmitting
+#define BUZZER_PIN D8     // GPIO15, Buzzer output
+
+#elif defined(ESP32)
+// insert correct PIN defines here for ESP32
+#else
+#error "This is not a ESP8266 or ESP32, dumbo!"
+#endif
 
 const int cwPaddlePinActiveLevel = ACTIVE_LOW;
 const int pttPinActiveLevel = ACTIVE_LOW;
