@@ -6,6 +6,17 @@
 #include <string.h>
 #include "Wire.h"
 #include <Rotary.h>
+#if defined(ESP8266)
+#include <ESP8266WiFi.h>
+#include <ESPAsyncTCP.h>
+#elif defined(ESP32)
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#endif
+#include <ESPAsyncWebServer.h>
+#include "AsyncJson.h"
+#include "ArduinoJson.h"
+#include <secrets.h>
 
 #define ACTIVE_LOW 0
 #define ACTIVE_HIGH 1
@@ -92,6 +103,7 @@ enum OperatingModes
 Si5351 si5351;
 JTEncode jtencode;
 Rotary rotary = Rotary(ROTARY_CLK_PIN, ROTARY_DT_PIN);
+AsyncWebServer server(80);
 
 // common global states
 #pragma region Common_Global_States
@@ -300,6 +312,31 @@ IRAM_ATTR void handleRotarySwitchPress()
 }
 #pragma endregion RotaryEncoder
 
+// Webserver
+#pragma region Webserver
+// function to send JSON response
+void sendJSON(AsyncWebServerRequest *request, const String &message)
+{
+  AsyncJsonResponse *response = new AsyncJsonResponse();
+  response->addHeader("Server", "ESP Async Web Server");
+  JsonVariant &root = response->getRoot();
+  root["freq"] = frequency;
+  root["opMode"] = operatingMode;
+  root["txMsg"] = txMessage;
+  root["myCall"] = myCallsign;
+  root["dxCall"] = dxCallsign;
+  root["dBm"] = dBm;
+  root["txEn"] = txEnabled;
+  root["myGrid"] = myGridLocator;
+  root["cal"] = si5351CalibrationFactor;
+  root["wpm"] = wpm;
+  root["message"] = message;
+  response->setLength();
+  request->send(response);
+}
+
+#pragma endregion Webserver
+
 // pin init
 void setup()
 {
@@ -337,6 +374,53 @@ void setup()
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_2MA);
   // output on/off
   si5351.output_enable(SI5351_CLK0, 0);
+
+  // Setup WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  if (WiFi.waitForConnectResult() != WL_CONNECTED)
+  {
+    Serial.printf("WiFi Failed!\n");
+    return;
+  }
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(200, "text/plain", "Hello, world"); });
+
+  server.on("/ping", HTTP_GET, [](AsyncWebServerRequest *request)
+            { sendJSON(request, "Success"); });
+
+  // Send a GET request to <IP>/get?message=<message>
+  server.on("/setmode", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+              String val;
+              if (request->hasParam("mode"))
+              {
+                val = request->getParam("mode")->value();
+                OperatingModes o = static_cast<OperatingModes>(val.toInt());
+                operatingMode = o;
+                sendJSON(request, String("Mode set to " + val));
+              }
+              else
+              {
+                val = "Invalid params";
+                sendJSON(request, String("Mode set to " + val));
+              }
+              /* request->send(200, "text/plain", "Mode set to " + val); */ });
+
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+
+  server.onNotFound([](AsyncWebServerRequest *request)
+                    {
+                      if (request->method() == HTTP_OPTIONS) {
+                        request->send(200);
+                      } else {
+                        request->send(404);
+                      } });
+
+  server.begin();
 }
 
 // main loop
