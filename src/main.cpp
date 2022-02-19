@@ -5,11 +5,38 @@
 #include <int.h>
 #include <string.h>
 #include "Wire.h"
+#include <Rotary.h>
 
 #define ACTIVE_LOW 0
 #define ACTIVE_HIGH 1
 
-// Mode defines
+// pin definitions
+#pragma region Pin_definitions
+
+#if defined(ESP8266)
+#define DIT_PIN D3        // GPIO0, DIT paddle
+#define DAH_PIN D4        // GPIO2, DAH paddle
+#define ROTARY_CLK_PIN D5 // GPIO14, Rotary encoder CLK pin
+#define ROTARY_DT_PIN D6  // GPIO12, Rotary encoder DT pin
+#define ROTARY_SW_PIN D7  // GPIO13, Rotary encoder SW pin
+#define PTT_PIN D0        // GPIO16, Will be active while transmitting
+#define BUZZER_PIN D8     // GPIO15, Buzzer output
+
+#elif defined(ESP32)
+// insert correct PIN defines here for ESP32
+#else
+#error "This is not a ESP8266 or ESP32, dumbo!"
+#endif
+
+const int cwPaddlePinActiveLevel = ACTIVE_LOW;
+const int pttPinActiveLevel = ACTIVE_LOW;
+const int rotaryButtonActiveLevel = ACTIVE_LOW;
+
+#pragma endregion Pin_definitions
+
+// Digital mode properties
+#pragma region DigitalModeProperties
+
 #define JT9_TONE_SPACING 174  // ~1.74 Hz
 #define JT65_TONE_SPACING 269 // ~2.69 Hz
 #define JT4_TONE_SPACING 437  // ~4.37 Hz
@@ -33,6 +60,8 @@
 #define WSPR_DEFAULT_FREQ 14097200UL
 #define FSQ_DEFAULT_FREQ 7105350UL // Base freq is 1350 Hz higher than dial freq in USB
 #define FT8_DEFAULT_FREQ 14075000UL
+
+#pragma endregion DigitalModeProperties
 
 // Enumerations
 #pragma region Enums
@@ -59,32 +88,10 @@ enum OperatingModes
 };
 #pragma endregion Enums
 
-// Class instantiation
+// Class instantiations
 Si5351 si5351;
 JTEncode jtencode;
-
-// pin definition for ESP8266 12E
-#pragma region Pin_definitions
-
-#if defined(ESP8266)
-#define DIT_PIN D3        // GPIO0, DIT paddle
-#define DAH_PIN D4        // GPIO2, DAH paddle
-#define ROTARY_CLK_PIN D5 // GPIO14, Rotary encoder CLK pin
-#define ROTARY_DT_PIN D6  // GPIO12, Rotary encoder DT pin
-#define ROTARY_SW_PIN D7  // GPIO13, Rotary encoder SW pin
-#define PTT_PIN D0        // GPIO16, Will be active while transmitting
-#define BUZZER_PIN D8     // GPIO15, Buzzer output
-
-#elif defined(ESP32)
-// insert correct PIN defines here for ESP32
-#else
-#error "This is not a ESP8266 or ESP32, dumbo!"
-#endif
-
-const int cwPaddlePinActiveLevel = ACTIVE_LOW;
-const int pttPinActiveLevel = ACTIVE_LOW;
-
-#pragma endregion Pin_definitions
+Rotary rotary = Rotary(ROTARY_CLK_PIN, ROTARY_DT_PIN);
 
 // common global states
 #pragma region Common_Global_States
@@ -258,18 +265,59 @@ boolean nextKeyerStateSet = false;
 MorseStates nextKeyerState;
 #pragma endregion CW_Keyer
 
+// Rotary Encoder logic
+#pragma region RotaryEncoder
+volatile int rotaryCounter = 0;
+IRAM_ATTR void handleRotate()
+{
+  // (a%b + b)%b use this formula while using rotaryCounter
+  unsigned char result = rotary.process();
+  if (result == DIR_CW)
+  {
+    rotaryCounter++;
+  }
+  else if (result == DIR_CCW)
+  {
+    rotaryCounter--;
+  }
+  Serial.println(rotaryCounter);
+}
+
+volatile boolean rotaryButtonPressed = false; // this flag should be reset where it is used
+IRAM_ATTR void handleRotarySwitchPress()
+{
+  // Get the pin reading.
+  if (rotaryButtonActiveLevel == ACTIVE_LOW)
+  {
+    if (!digitalRead(ROTARY_SW_PIN))
+      rotaryButtonPressed = true;
+  }
+  else
+  {
+    if (!!digitalRead(ROTARY_SW_PIN))
+      rotaryButtonPressed = true;
+  }
+}
+#pragma endregion RotaryEncoder
+
 // pin init
 void setup()
 {
-  // set pinmodes for cw keyer pins
+  // set pinmodes
   pinMode(DIT_PIN, INPUT_PULLUP);
   pinMode(DAH_PIN, INPUT_PULLUP);
   pinMode(PTT_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(ROTARY_CLK_PIN, INPUT);
+  pinMode(ROTARY_DT_PIN, INPUT);
+  pinMode(ROTARY_SW_PIN, INPUT_PULLUP);
 
-  // attach interrupts for cw keyer paddles
+  // attach interrupts
   attachInterrupt(digitalPinToInterrupt(DIT_PIN), handleDitInterrupt, CHANGE);
   attachInterrupt(digitalPinToInterrupt(DAH_PIN), handleDahInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ROTARY_CLK_PIN), handleRotate, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ROTARY_DT_PIN), handleRotate, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ROTARY_SW_PIN), handleRotarySwitchPress, CHANGE);
 
   // Start serial and initialize the Si5351
   Serial.begin(57600);
