@@ -319,6 +319,12 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(ROTARY_DT_PIN), handleRotate, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ROTARY_SW_PIN), handleRotarySwitchPress, CHANGE);
 
+  // turn off PTT_PIN by default
+  if (pttPinActiveLevel == ACTIVE_LOW)
+    digitalWrite(PTT_PIN, HIGH);
+  else
+    digitalWrite(PTT_PIN, LOW);
+
   // Start serial and initialize the Si5351
   Serial.begin(57600);
   si5351.init(SI5351_CRYSTAL_LOAD_8PF, 0, 0);
