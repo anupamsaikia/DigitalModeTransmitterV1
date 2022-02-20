@@ -97,6 +97,21 @@ enum OperatingModes
   MODE_JT65,
   MODE_JT4,
 };
+
+// Text array of the OperatingModes enum. Keep the order and length same
+const String operatingModeTexts[] = {
+    "CW",
+    "PIXIE_CW",
+    "WSPR",
+    "FT8",
+    "FSQ_2",
+    "FSQ_3",
+    "FSQ_4_5",
+    "FSQ_6",
+    "JT9",
+    "JT65",
+    "JT4"};
+
 #pragma endregion Enums
 
 // Class instantiations
@@ -124,6 +139,77 @@ uint8_t symbolCount;
 uint16_t toneDelay, toneSpacing;
 
 #pragma endregion Common_Global_States
+
+// Global state setters
+#pragma region GlobalStateSetters
+
+// sets value of frequency
+void setFrequency(const String &value)
+{
+  char *pEnd;
+  if (strtoull(value.c_str(), &pEnd, 10))
+    frequency = strtoull(value.c_str(), &pEnd, 10);
+
+  // change si5351 frequency
+  si5351.set_freq(frequency, SI5351_CLK0);
+}
+
+// sets value of operatingMode
+void setOperatingMode(const String &value)
+{
+  operatingMode = static_cast<OperatingModes>(value.toInt());
+}
+
+// sets value of txMessage. Max length 99
+void setTxMessage(const String &value)
+{
+  strcpy(txMessage, value.c_str());
+}
+
+// sets value of txEnabled
+void setTxEnabled(const String &value)
+{
+  if (value == "true")
+    txEnabled = true;
+  else if (value == "false")
+    txEnabled = false;
+}
+
+// sets value of wpm
+void setWPM(const String &value)
+{
+  if (value.toInt())
+    wpm = value.toInt();
+}
+
+// sets value of myCallsign. Max length 9
+void setMyCallsign(const String &value)
+{
+  strcpy(myCallsign, value.c_str());
+}
+
+// sets value of dxCallsign. Max length 9
+void setDxCallsign(const String &value)
+{
+  strcpy(dxCallsign, value.c_str());
+}
+
+// sets value of myGridLocator. Max length 9
+void setMyGrid(const String &value)
+{
+  strcpy(myGridLocator, value.c_str());
+}
+
+// sets value of si5351CalibrationFactor
+void setCalibration(const String &value)
+{
+  if (value.toInt())
+    si5351CalibrationFactor = value.toInt();
+
+  si5351.set_correction(si5351CalibrationFactor, SI5351_PLL_INPUT_XO);
+}
+
+#pragma endregion GlobalStateSetters
 
 // JTEncode logic
 #pragma region JTEncode
@@ -386,6 +472,8 @@ void setup()
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
 
+  // Webserver Handlers
+#pragma region WebserverHandlers
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(200, "text/plain", "Hello, world"); });
 
@@ -393,25 +481,64 @@ void setup()
             { sendJSON(request, "Success"); });
 
   // Send a GET request to <IP>/get?message=<message>
-  server.on("/setmode", HTTP_GET, [](AsyncWebServerRequest *request)
+  server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request)
             {
-              String val;
-              if (request->hasParam("mode"))
+              
+              if (request->hasParam("key") && request->hasParam("value"))
               {
-                val = request->getParam("mode")->value();
-                OperatingModes o = static_cast<OperatingModes>(val.toInt());
-                operatingMode = o;
-                sendJSON(request, String("Mode set to " + val));
+                String key = request->getParam("key")->value();
+                String value = request->getParam("value")->value();
+
+                if(key == "freq"){
+                  // set frequency
+                  setFrequency(value);
+                  sendJSON(request, "Freq set to : " + String((double)frequency/100000000, 8U));
+                } else if(key == "opMode"){
+                  // set operatingMode
+                  setOperatingMode(value);
+                  sendJSON(request, "Mode set to : " + operatingModeTexts[operatingMode]);
+                } else if(key == "txMsg"){
+                  // set txMessage
+                  setTxMessage(value);
+                  sendJSON(request, "TxMsg set to : " + String(txMessage));
+                } else if(key == "txEn"){
+                  // set txEnabled
+                  setTxEnabled(value);
+                  sendJSON(request, "TxEnabled set to : " + txEnabled ? "true" : "false");
+                } else if(key == "wpm"){
+                  // set wpm
+                  setWPM(value);
+                  sendJSON(request, "WPM set to : " + String(wpm));
+                } else if(key == "myCall"){
+                  // set myCallsign
+                  setMyCallsign(value);
+                  sendJSON(request, "My call set to : " + String(myCallsign));
+                } else if(key == "dxCall"){
+                  // set dxCallsign
+                  setDxCallsign(value);
+                  sendJSON(request, "Dx call set to : " + String(dxCallsign));
+                } else if(key == "myGrid"){
+                  // set myGridLocator
+                  setMyGrid(value);
+                  sendJSON(request, "My Grid set to : " + String(myGridLocator));
+                } else if(key == "cal"){
+                  // set si5351CalibrationFactor
+                  setCalibration(value);
+                  sendJSON(request, "Cal factor set to : " + String(si5351CalibrationFactor));
+                } else {
+                  // key not matched
+                  sendJSON(request, "Invalid params");
+                }
               }
               else
               {
-                val = "Invalid params";
-                sendJSON(request, String("Mode set to " + val));
-              }
-              /* request->send(200, "text/plain", "Mode set to " + val); */ });
+                sendJSON(request, "Invalid params");
+              } });
 
+  // CORS headers
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
 
+  // Handle CORS preflight and 404
   server.onNotFound([](AsyncWebServerRequest *request)
                     {
                       if (request->method() == HTTP_OPTIONS) {
@@ -419,7 +546,9 @@ void setup()
                       } else {
                         request->send(404);
                       } });
+#pragma endregion WebserverHandlers
 
+  // Start Webserver
   server.begin();
 }
 
