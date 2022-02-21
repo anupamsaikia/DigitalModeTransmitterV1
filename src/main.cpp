@@ -893,18 +893,45 @@ void loop()
     case MODE_FSQ_2:
       toneSpacing = FSQ_TONE_SPACING;
       toneDelay = FSQ_2_DELAY;
+      if (txEnabled)
+      {
+        setTxBuffer();
+        jtTransmitMessage();
+        txEnabled = false;
+      }
       break;
+
     case MODE_FSQ_3:
       toneSpacing = FSQ_TONE_SPACING;
       toneDelay = FSQ_3_DELAY;
+      if (txEnabled)
+      {
+        setTxBuffer();
+        jtTransmitMessage();
+        txEnabled = false;
+      }
       break;
+
     case MODE_FSQ_4_5:
       toneSpacing = FSQ_TONE_SPACING;
       toneDelay = FSQ_4_5_DELAY;
+      if (txEnabled)
+      {
+        setTxBuffer();
+        jtTransmitMessage();
+        txEnabled = false;
+      }
       break;
+
     case MODE_FSQ_6:
       toneSpacing = FSQ_TONE_SPACING;
       toneDelay = FSQ_6_DELAY;
+      if (txEnabled)
+      {
+        setTxBuffer();
+        jtTransmitMessage();
+        txEnabled = false;
+      }
       break;
     }
 
