@@ -16,6 +16,7 @@
 #include <ESPAsyncWebServer.h>
 #include "AsyncJson.h"
 #include "ArduinoJson.h"
+#include <Morse.h>
 #include <secrets.h>
 
 #define ACTIVE_LOW 0
@@ -119,12 +120,13 @@ Si5351 si5351;
 JTEncode jtencode;
 Rotary rotary = Rotary(ROTARY_CLK_PIN, ROTARY_DT_PIN);
 AsyncWebServer server(80);
+Morse morse(0, 15.0F);
 
 // common global states
 #pragma region Common_Global_States
 
 int wpm = 15;                             // Words per minute for cw mode
-DeviceModes deviceMode = STANDALONE;      // default device mode is standalone
+DeviceModes deviceMode = WEBSERVER;       // default device mode is standalone
 OperatingModes operatingMode = MODE_CW;   // default op mode is CW
 uint64_t frequency = 7023000 * 100ULL;    // 7.023 MHz
 int32_t si5351CalibrationFactor = 149300; // si5351 calibration factor
@@ -176,10 +178,12 @@ void setTxEnabled(const String &value)
 }
 
 // sets value of wpm
-void setWPM(const String &value)
+void setMorseWPM(const String &value)
 {
   if (value.toInt())
     wpm = value.toInt();
+
+  morse.setWPM((float)wpm);
 }
 
 // sets value of myCallsign. Max length 9
@@ -283,8 +287,11 @@ void setTxBuffer()
 }
 #pragma endregion JTEncode
 
-// CW Keyer functionality
-#pragma region CW_Keyer
+// Morse and CW Keyer functionality
+#pragma region MorseAndCWKeyer
+boolean morseTxMsgSet = false;
+unsigned long previousMorseMilis = 0;
+
 // calculate timings in miliseconds based on the formula: T = 1200 / WPM
 int ditLength = 1200 / wpm;
 int dahLength = 1200 * 3 / wpm;
@@ -361,7 +368,7 @@ unsigned long lastKeyerIdleTriggered = 0;
 
 boolean nextKeyerStateSet = false;
 MorseStates nextKeyerState;
-#pragma endregion CW_Keyer
+#pragma endregion MorseAndCWKeyer
 
 // Rotary Encoder logic
 #pragma region RotaryEncoder
@@ -507,7 +514,7 @@ void setup()
                   sendJSON(request, "TxEnabled set to : " + txEnabled ? "true" : "false");
                 } else if(key == "wpm"){
                   // set wpm
-                  setWPM(value);
+                  setMorseWPM(value);
                   sendJSON(request, "WPM set to : " + String(wpm));
                 } else if(key == "myCall"){
                   // set myCallsign
@@ -550,6 +557,9 @@ void setup()
 
   // Start Webserver
   server.begin();
+
+  // Morse
+  morse.output_pin = 0;
 }
 
 // main loop
@@ -817,7 +827,38 @@ void loop()
     switch (operatingMode)
     {
     case MODE_CW:
-      // cw logic goes here
+      // cw logic
+      if (txEnabled)
+      {
+        // Start sending morse
+        if (!morseTxMsgSet)
+        {
+          morse.send(txMessage);
+          morseTxMsgSet = true;
+        }
+        else
+        {
+          // Morse sent
+          if (!morse.busy)
+          {
+            morseTxMsgSet = false;
+            txEnabled = false;
+          }
+        }
+
+        // update every 1 milisecond
+        if (now != previousMorseMilis)
+        {
+          morse.update();
+
+          if (morse.tx)
+            keyDown();
+          else
+            keyUp();
+
+          previousMorseMilis = now;
+        }
+      }
       break;
 
     case MODE_PIXIE_CW:
