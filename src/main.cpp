@@ -17,6 +17,7 @@
 #include "AsyncJson.h"
 #include "ArduinoJson.h"
 #include <Morse.h>
+#include "SSD1306Wire.h"
 #include <secrets.h>
 
 #define ACTIVE_LOW 0
@@ -84,6 +85,13 @@ enum DeviceModes
   WSJTX
 };
 
+// Text array of the DeviceModes enum. Keep the order and length same
+const String deviceModeTexts[] = {
+    "Standalone",
+    "Webserver",
+    "WSJT-X",
+};
+
 enum OperatingModes
 {
   MODE_CW,
@@ -121,6 +129,7 @@ JTEncode jtencode;
 Rotary rotary = Rotary(ROTARY_CLK_PIN, ROTARY_DT_PIN);
 AsyncWebServer server(80);
 Morse morse(0, 15.0F);
+SSD1306Wire display(0x3c, SDA, SCL);
 
 // common global states
 #pragma region Common_Global_States
@@ -139,6 +148,7 @@ uint8_t dBm = 27;
 uint8_t txBuffer[255];
 uint8_t symbolCount;
 uint16_t toneDelay, toneSpacing;
+char IP[16] = "0.0.0.0";
 
 #pragma endregion Common_Global_States
 
@@ -430,6 +440,28 @@ void sendJSON(AsyncWebServerRequest *request, const String &message)
 
 #pragma endregion Webserver
 
+// Display functionality
+#pragma region Display
+
+// Primary frame. Shows the most important device states
+void showScreen1()
+{
+  display.clear();
+
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(0, 0, String((double)frequency / 100000000, 6U) + "MHz");
+
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(0, 20, "Mode: " + deviceModeTexts[deviceMode]);
+  display.drawString(0, 30, "OpMode: " + operatingModeTexts[operatingMode]);
+  display.drawString(0, 40, "WPM: " + String(wpm));
+  display.drawString(0, 50, "IP: " + String(IP));
+
+  display.display();
+}
+
+#pragma endregion Display
+
 // pin init
 void setup()
 {
@@ -456,7 +488,7 @@ void setup()
     digitalWrite(PTT_PIN, LOW);
 
   // Start serial and initialize the Si5351
-  Serial.begin(57600);
+  Serial.begin(115200);
   si5351.init(SI5351_CRYSTAL_LOAD_8PF, 0, 0);
 
   si5351.set_correction(si5351CalibrationFactor, SI5351_PLL_INPUT_XO);
@@ -468,6 +500,11 @@ void setup()
   // output on/off
   si5351.output_enable(SI5351_CLK0, 0);
 
+  // Initialising the UI
+  display.init();
+  display.flipScreenVertically();
+  display.setFont(ArialMT_Plain_10);
+
   // Setup WiFi
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -477,7 +514,8 @@ void setup()
     return;
   }
   Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
+  strcpy(IP, WiFi.localIP().toString().c_str());
+  Serial.println(IP);
 
   // Webserver Handlers
 #pragma region WebserverHandlers
@@ -562,12 +600,13 @@ void setup()
   morse.output_pin = 0;
 }
 
-// main loop
-
 unsigned long now = 0;
+// main loop
 void loop()
 {
   now = millis();
+
+  showScreen1();
 
   if (deviceMode == STANDALONE)
   {
