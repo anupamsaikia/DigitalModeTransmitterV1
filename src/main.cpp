@@ -18,6 +18,7 @@
 #include "ArduinoJson.h"
 #include <Morse.h>
 #include "SSD1306Wire.h"
+#include <MyFont.h>
 #include <secrets.h>
 
 #define ACTIVE_LOW 0
@@ -395,7 +396,6 @@ IRAM_ATTR void handleRotate()
   {
     rotaryCounter--;
   }
-  Serial.println(rotaryCounter);
 }
 
 volatile boolean rotaryButtonPressed = false; // this flag should be reset where it is used
@@ -448,7 +448,7 @@ void showScreen1()
 {
   display.clear();
 
-  display.setFont(ArialMT_Plain_16);
+  display.setFont(Roboto_Mono_Thin_16);
   display.drawString(0, 0, String((double)frequency / 100000000, 6U) + "MHz");
 
   display.setFont(ArialMT_Plain_10);
@@ -458,6 +458,12 @@ void showScreen1()
   display.drawString(0, 50, "IP: " + String(IP));
 
   display.display();
+}
+
+void updateDisplay()
+{
+  // TODO : Add logic to show different screens based on program states
+  showScreen1();
 }
 
 #pragma endregion Display
@@ -500,11 +506,6 @@ void setup()
   // output on/off
   si5351.output_enable(SI5351_CLK0, 0);
 
-  // Initialising the UI
-  display.init();
-  display.flipScreenVertically();
-  display.setFont(ArialMT_Plain_10);
-
   // Setup WiFi
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -523,7 +524,7 @@ void setup()
             { request->send(200, "text/plain", "Hello, world"); });
 
   server.on("/ping", HTTP_GET, [](AsyncWebServerRequest *request)
-            { sendJSON(request, "Success"); });
+            { sendJSON(request, "Success"); updateDisplay(); });
 
   // Send a GET request to <IP>/get?message=<message>
   server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -578,7 +579,8 @@ void setup()
               else
               {
                 sendJSON(request, "Invalid params");
-              } });
+              }
+              updateDisplay(); });
 
   // CORS headers
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
@@ -598,15 +600,29 @@ void setup()
 
   // Morse
   morse.output_pin = 0;
+
+  // Initialising the UI
+  display.init();
+  display.flipScreenVertically();
+  display.setFont(ArialMT_Plain_10);
+  updateDisplay();
 }
 
 unsigned long now = 0;
+int previousRotaryCounter = 0;
 // main loop
 void loop()
 {
   now = millis();
 
-  showScreen1();
+  // Print a counter based on rotarystate and change deviveMode for testing
+  if (previousRotaryCounter != rotaryCounter)
+  {
+    Serial.println(rotaryCounter);
+    previousRotaryCounter = rotaryCounter;
+    deviceMode = static_cast<DeviceModes>((rotaryCounter % 3 + 3) % 3);
+    updateDisplay();
+  }
 
   if (deviceMode == STANDALONE)
   {
