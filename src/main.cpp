@@ -13,6 +13,7 @@
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #endif
+#include <WiFiUdp.h>
 #include <ESPAsyncWebServer.h>
 #include "AsyncJson.h"
 #include "ArduinoJson.h"
@@ -131,12 +132,13 @@ Rotary rotary = Rotary(ROTARY_CLK_PIN, ROTARY_DT_PIN);
 AsyncWebServer server(80);
 Morse morse(0, 15.0F);
 SSD1306Wire display(0x3c, SDA, SCL);
+WiFiUDP Udp;
 
 // common global states
 #pragma region Common_Global_States
 
 int wpm = 15;                             // Words per minute for cw mode
-DeviceModes deviceMode = WEBSERVER;       // default device mode is standalone
+DeviceModes deviceMode = STANDALONE;      // default device mode is standalone
 OperatingModes operatingMode = MODE_CW;   // default op mode is CW
 uint64_t frequency = 7023000 * 100ULL;    // 7.023 MHz
 int32_t si5351CalibrationFactor = 149300; // si5351 calibration factor
@@ -145,7 +147,7 @@ char txMessage[100] = "";                 // tx message
 char myCallsign[10] = "VU2EHJ";
 char dxCallsign[10] = "VU3HZX";
 char myGridLocator[10] = "NL66WE";
-uint8_t dBm = 27;
+uint8_t dBm = 30;
 uint8_t txBuffer[255];
 uint8_t symbolCount;
 uint16_t toneDelay, toneSpacing;
@@ -415,6 +417,58 @@ IRAM_ATTR void handleRotarySwitchPress()
 }
 #pragma endregion RotaryEncoder
 
+// WSJTX UDP
+#pragma region WSJTX
+const unsigned int localUdpPort = 2237; // local port to listen on
+uint8_t WSJTX_incomingByteArray[255];   // buffer for incoming packets
+size_t WSJTX_currentIndex = 0;
+
+// WSJTX helper functions
+uint8 readuInt8()
+{
+  uint8 val;
+  memcpy(&val, &WSJTX_incomingByteArray[WSJTX_currentIndex], sizeof(val));
+  WSJTX_currentIndex += 1;
+  return val;
+}
+
+uint32 readuInt32()
+{
+  uint32 bigEndianValue;
+  memcpy(&bigEndianValue, &WSJTX_incomingByteArray[WSJTX_currentIndex], sizeof(bigEndianValue));
+  WSJTX_currentIndex += 4;
+  uint32 theUnpackedValue = ntohl(bigEndianValue);
+  return theUnpackedValue;
+}
+
+int32 readInt32()
+{
+  int32 bigEndianValue;
+  memcpy(&bigEndianValue, &WSJTX_incomingByteArray[WSJTX_currentIndex], sizeof(bigEndianValue));
+  WSJTX_currentIndex += 4;
+  int32 theUnpackedValue = ntohl(bigEndianValue);
+  return theUnpackedValue;
+}
+
+uint64 readuInt64()
+{
+  uint64 bigEndianValue;
+  memcpy(&bigEndianValue, &WSJTX_incomingByteArray[WSJTX_currentIndex], sizeof(bigEndianValue));
+  WSJTX_currentIndex += 8;
+  uint64 theUnpackedValue = __builtin_bswap64(bigEndianValue);
+  return theUnpackedValue;
+}
+
+bool readBool()
+{
+  bool val;
+  memcpy(&val, &WSJTX_incomingByteArray[WSJTX_currentIndex], sizeof(val));
+  WSJTX_currentIndex += 1;
+  return val;
+}
+
+#pragma endregion WSJTX
+
 // Webserver
 #pragma region Webserver
 // function to send JSON response
@@ -460,10 +514,39 @@ void showScreen1()
   display.display();
 }
 
+void showScreenWSJTX()
+{
+  display.clear();
+
+  display.setFont(Roboto_Mono_Thin_16);
+  display.drawString(0, 0, String((double)frequency / 100000000, 6U) + "MHz");
+
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(0, 20, "DeviceMode: " + deviceModeTexts[deviceMode]);
+  display.drawString(0, 30, "OpMode: " + operatingModeTexts[operatingMode]);
+  if (operatingMode == MODE_WSPR)
+  {
+    display.drawString(0, 40, myCallsign + String(" ") + myGridLocator + String(" ") + String(dBm));
+  }
+  else
+  {
+    display.drawString(0, 40, String(txMessage));
+  }
+  display.drawString(0, 50, "TxEnabled: " + String(txEnabled ? "true" : "false"));
+
+  display.display();
+}
+
 void updateDisplay()
 {
-  // TODO : Add logic to show different screens based on program states
-  showScreen1();
+  if (deviceMode == WSJTX)
+  {
+    showScreenWSJTX();
+  }
+  else
+  {
+    showScreen1();
+  }
 }
 
 #pragma endregion Display
@@ -597,6 +680,10 @@ void setup()
 
   // Start Webserver
   server.begin();
+
+  // Begin UDP Listener
+  Udp.begin(localUdpPort);
+  Serial.printf("Now listening at IP %s, UDP port %d\n", IP, localUdpPort);
 
   // Morse
   morse.output_pin = 0;
@@ -995,7 +1082,263 @@ void loop()
   else
   {
     // logic for device mode WSJTX
-  }
+    // WSJTX message type: https://sourceforge.net/p/wsjt/wsjtx/ci/master/tree/Network/NetworkMessage.hpp#l141
 
-  // end of loop
+    int packetSize = Udp.parsePacket();
+    if (packetSize)
+    {
+      unsigned long now = millis();
+
+      // receive incoming UDP packets
+      int len = Udp.read(WSJTX_incomingByteArray, 255);
+      if (len > 0)
+      {
+        WSJTX_currentIndex = 8; // skip packet header
+
+        // Packet Type
+        uint32 WSJTX_packetType = readuInt32();
+        if (WSJTX_packetType == 1)
+        {
+          //--------------------------------------------------------------------//
+          // Client id
+          int32 WSJTX_clientIdLength = readInt32();
+          char WSJTX_clientId[WSJTX_clientIdLength + 1];
+          for (int32 i = 0; i < WSJTX_clientIdLength; i++)
+          {
+            WSJTX_clientId[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_clientId[WSJTX_clientIdLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // Dial Frequency
+          uint64 WSJTX_dialFrequency = readuInt64();
+
+          //--------------------------------------------------------------------//
+          // Mode
+          int32 WSJTX_modeLength = readInt32();
+          char WSJTX_mode[WSJTX_modeLength + 1];
+          for (int32 i = 0; i < WSJTX_modeLength; i++)
+          {
+            WSJTX_mode[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_mode[WSJTX_modeLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // DX Call
+          int32 WSJTX_dxCallLength = readInt32();
+          char WSJTX_dxCall[WSJTX_dxCallLength + 1];
+          for (int32 i = 0; i < WSJTX_dxCallLength; i++)
+          {
+            WSJTX_dxCall[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_dxCall[WSJTX_dxCallLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // Report
+          int32 WSJTX_reportLength = readInt32();
+          char WSJTX_report[WSJTX_reportLength + 1];
+          for (int32 i = 0; i < WSJTX_reportLength; i++)
+          {
+            WSJTX_report[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_report[WSJTX_reportLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // Tx mode
+          int32 WSJTX_txModeLength = readInt32();
+          char WSJTX_txMode[WSJTX_txModeLength + 1];
+          for (int32 i = 0; i < WSJTX_txModeLength; i++)
+          {
+            WSJTX_txMode[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_txMode[WSJTX_txModeLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // Tx Enabled
+          bool WSJTX_txEnabled = readBool();
+
+          //--------------------------------------------------------------------//
+          // Transmitting
+          bool WSJTX_transmitting = readBool();
+
+          //--------------------------------------------------------------------//
+          // Decoding
+          bool WSJTX_decoding = readBool();
+
+          //--------------------------------------------------------------------//
+          // Rx DF
+          uint32 WSJTX_rxDF = readuInt32();
+
+          //--------------------------------------------------------------------//
+          // Tx DF
+          uint32 WSJTX_txDF = readuInt32();
+
+          //--------------------------------------------------------------------//
+          // DE call
+          int32 WSJTX_deCallLength = readInt32();
+          char WSJTX_deCall[WSJTX_deCallLength + 1];
+          for (int32 i = 0; i < WSJTX_deCallLength; i++)
+          {
+            WSJTX_deCall[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_deCall[WSJTX_deCallLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // DE grid
+          int32 WSJTX_deGridLength = readInt32();
+          char WSJTX_deGrid[WSJTX_deGridLength + 1];
+          for (int32 i = 0; i < WSJTX_deGridLength; i++)
+          {
+            WSJTX_deGrid[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_deGrid[WSJTX_deGridLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // DX grid
+          int32 WSJTX_dxGridLength = readInt32();
+          char WSJTX_dxGrid[WSJTX_dxGridLength + 1];
+          for (int32 i = 0; i < WSJTX_dxGridLength; i++)
+          {
+            WSJTX_dxGrid[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_dxGrid[WSJTX_dxGridLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // Tx Watchdog
+          bool WSJTX_txWatchdog = readBool();
+
+          //--------------------------------------------------------------------//
+          // Sub-mode
+          int32 WSJTX_subModeLength = readInt32();
+          char WSJTX_subMode[WSJTX_subModeLength + 1];
+          for (int32 i = 0; i < WSJTX_subModeLength; i++)
+          {
+            WSJTX_subMode[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_subMode[WSJTX_subModeLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // Fast mode
+          bool WSJTX_fastMode = readBool();
+
+          //--------------------------------------------------------------------//
+          // Special Operation Mode
+          uint8 WSJTX_specialOpMode = readuInt8();
+
+          // Frequency Tolerance
+          uint32 WSJTX_frequencyTolerance = readuInt32();
+
+          //--------------------------------------------------------------------//
+          // T/R Period
+          uint32 WSJTX_txrxPeriod = readuInt32();
+
+          //--------------------------------------------------------------------//
+          // Configuration Name
+          int32 WSJTX_configNameLength = readInt32();
+          char WSJTX_configName[WSJTX_configNameLength + 1];
+          for (int32 i = 0; i < WSJTX_configNameLength; i++)
+          {
+            WSJTX_configName[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_configName[WSJTX_configNameLength] = 0;
+
+          //--------------------------------------------------------------------//
+          // Tx Message
+          int32 WSJTX_txMessageLength = readInt32();
+          // Funfact: While testing, I got WSJTX_txMessageLength=37 regardless of the actual message length.
+          // Therefore, WSJTX_txMessage needs to be trimmed.
+          char WSJTX_txMessage[WSJTX_txMessageLength + 1];
+          for (int32 i = 0; i < WSJTX_txMessageLength; i++)
+          {
+            WSJTX_txMessage[i] = WSJTX_incomingByteArray[WSJTX_currentIndex];
+            WSJTX_currentIndex += 1;
+          }
+          WSJTX_txMessage[WSJTX_txMessageLength] = 0;
+
+          // set frequency
+          frequency = (WSJTX_dialFrequency + WSJTX_txDF) * 100ULL;
+
+          // trim tx message
+          String newTxMessage = String(WSJTX_txMessage);
+          newTxMessage.trim();
+
+          if (strcmp(WSJTX_mode, "FT8") == 0)
+          {
+            symbolCount = FT8_SYMBOL_COUNT;
+            toneSpacing = FT8_TONE_SPACING;
+            toneDelay = FT8_DELAY;
+            operatingMode = MODE_FT8;
+            txEnabled = WSJTX_txEnabled;
+            strcpy(txMessage, newTxMessage.c_str());
+          }
+          else if (strcmp(WSJTX_mode, "WSPR") == 0)
+          {
+            symbolCount = WSPR_SYMBOL_COUNT;
+            toneSpacing = WSPR_TONE_SPACING;
+            toneDelay = WSPR_DELAY;
+            operatingMode = MODE_WSPR;
+            txEnabled = WSJTX_txEnabled;
+            strcpy(myCallsign, WSJTX_deCall);
+            strcpy(myGridLocator, WSJTX_deGrid);
+            // dbm value is not taken from WSJTX.
+            // Enter correct dbm value from the web interface
+          }
+          else if (strcmp(WSJTX_mode, "JT9") == 0)
+          {
+            symbolCount = JT9_SYMBOL_COUNT;
+            toneSpacing = JT9_TONE_SPACING;
+            toneDelay = JT9_DELAY;
+            operatingMode = MODE_JT9;
+            txEnabled = WSJTX_txEnabled;
+            strcpy(txMessage, newTxMessage.c_str());
+          }
+          else if (strcmp(WSJTX_mode, "JT65") == 0)
+          {
+            symbolCount = JT65_SYMBOL_COUNT;
+            toneSpacing = JT65_TONE_SPACING;
+            toneDelay = JT65_DELAY;
+            operatingMode = MODE_JT65;
+            txEnabled = WSJTX_txEnabled;
+            strcpy(txMessage, newTxMessage.c_str());
+          }
+          else if (strcmp(WSJTX_mode, "JT4") == 0)
+          {
+            symbolCount = JT4_SYMBOL_COUNT;
+            toneSpacing = JT4_TONE_SPACING;
+            toneDelay = JT4_DELAY;
+            operatingMode = MODE_JT4;
+            txEnabled = WSJTX_txEnabled;
+            strcpy(txMessage, newTxMessage.c_str());
+          }
+          else
+          {
+            txEnabled = false;
+          }
+
+          // update display
+          updateDisplay();
+
+          // transmit Message
+          if (txEnabled && WSJTX_transmitting)
+          {
+            setTxBuffer();
+            jtTransmitMessage();
+            txEnabled = false;
+          }
+        }
+      }
+    }
+  }
 }
+
+// end of loop
