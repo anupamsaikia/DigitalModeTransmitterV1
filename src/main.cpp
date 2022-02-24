@@ -19,6 +19,7 @@
 #include "ArduinoJson.h"
 #include <Morse.h>
 #include "SSD1306Wire.h"
+#include <FT8.h>
 #include <MyFont.h>
 #include <secrets.h>
 
@@ -133,6 +134,7 @@ AsyncWebServer server(80);
 Morse morse(0, 15.0F);
 SSD1306Wire display(0x3c, SDA, SCL);
 WiFiUDP Udp;
+FT8 ft8;
 
 // common global states
 #pragma region Common_Global_States
@@ -1331,7 +1333,14 @@ void loop()
           // transmit Message
           if (txEnabled && WSJTX_transmitting)
           {
-            setTxBuffer();
+            if (operatingMode == MODE_FT8)
+            {
+              ft8.encode(txMessage, txBuffer, false);
+            }
+            else
+            {
+              setTxBuffer();
+            }
             jtTransmitMessage();
             txEnabled = false;
           }
