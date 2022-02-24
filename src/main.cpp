@@ -154,6 +154,7 @@ uint8_t txBuffer[255];
 uint8_t symbolCount;
 uint16_t toneDelay, toneSpacing;
 char IP[16] = "0.0.0.0";
+boolean refreshDisplay = false;
 
 #pragma endregion Common_Global_States
 
@@ -609,7 +610,7 @@ void setup()
             { request->send(200, "text/plain", "Hello, world"); });
 
   server.on("/ping", HTTP_GET, [](AsyncWebServerRequest *request)
-            { sendJSON(request, "Success"); updateDisplay(); });
+            { sendJSON(request, "Success"); });
 
   // Send a GET request to <IP>/get?message=<message>
   server.on("/set", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -660,12 +661,13 @@ void setup()
                   // key not matched
                   sendJSON(request, "Invalid params");
                 }
+
+                refreshDisplay = true;
               }
               else
               {
                 sendJSON(request, "Invalid params");
-              }
-              updateDisplay(); });
+              } });
 
   // CORS headers
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
@@ -703,6 +705,12 @@ int previousRotaryCounter = 0;
 void loop()
 {
   now = millis();
+
+  if (refreshDisplay)
+  {
+    updateDisplay();
+    refreshDisplay = false;
+  }
 
   // Print a counter based on rotarystate and change deviveMode for testing
   if (previousRotaryCounter != rotaryCounter)
