@@ -101,6 +101,7 @@ enum OperatingModes
   MODE_PIXIE_CW,
   MODE_WSPR,
   MODE_FT8,
+  MODE_FT4,
   MODE_FSQ_2,
   MODE_FSQ_3,
   MODE_FSQ_4_5,
@@ -116,6 +117,7 @@ const String operatingModeTexts[] = {
     "PIXIE_CW",
     "WSPR",
     "FT8",
+    "FT4",
     "FSQ_2",
     "FSQ_3",
     "FSQ_4_5",
@@ -1291,6 +1293,15 @@ void loop()
             txEnabled = WSJTX_txEnabled;
             strcpy(txMessage, newTxMessage.c_str());
           }
+          else if (strcmp(WSJTX_mode, "FT4") == 0)
+          {
+            symbolCount = 105;
+            toneSpacing = 2083.3333; // ~20.83 Hz
+            toneDelay = 47;
+            operatingMode = MODE_FT4;
+            txEnabled = WSJTX_txEnabled;
+            strcpy(txMessage, newTxMessage.c_str());
+          }
           else if (strcmp(WSJTX_mode, "WSPR") == 0)
           {
             symbolCount = WSPR_SYMBOL_COUNT;
@@ -1344,6 +1355,10 @@ void loop()
             if (operatingMode == MODE_FT8)
             {
               ft8.encode(txMessage, txBuffer, false);
+            }
+            else if (operatingMode == MODE_FT4)
+            {
+              ft8.encode(txMessage, txBuffer, true);
             }
             else
             {
