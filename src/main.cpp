@@ -151,7 +151,7 @@ char txMessage[100] = "";                 // tx message
 char myCallsign[10] = "VU2EHJ";
 char dxCallsign[10] = "VU3HZX";
 char myGridLocator[10] = "NL66WE";
-uint8_t dBm = 30;
+uint8_t dBm = 33; // 2 watt
 uint8_t txBuffer[255];
 uint8_t symbolCount;
 uint16_t toneDelay, toneSpacing;
@@ -590,7 +590,7 @@ void setup()
   // Set CLK0 to output 7 MHz
   si5351.set_freq(frequency, SI5351_CLK0);
 
-  si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_2MA);
+  si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
   // output on/off
   si5351.output_enable(SI5351_CLK0, 0);
 
